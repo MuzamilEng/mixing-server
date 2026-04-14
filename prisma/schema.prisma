@@ -1,0 +1,335 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id                      String         @id @default(cuid())
+  email                   String         @unique @map("email")
+  password_hash           String?
+  name                    String?        @map("full_name")
+  image                   String?        @map("avatar_url")
+  auth_provider           AuthProvider   @default(email) @map("auth_provider")
+  plan                    Plan           @default(free)
+  plan_started_at         DateTime?      @map("plan_started_at")
+  plan_renewed_at         DateTime?      @map("plan_renewed_at")
+  stories_this_month      Int            @default(0) @map("stories_this_month")
+  audio_mins_this_month   Decimal        @default(0) @map("audio_mins_this_month")
+  total_stories_ever      Int            @default(0) @map("total_stories_ever")
+  total_audio_plays       Int            @default(0) @map("total_audio_plays")
+  total_downloads         Int            @default(0) @map("total_downloads")
+  streak_days             Int            @default(0) @map("streak_days")
+  streak_last_date        DateTime?      @map("streak_last_date")
+  voice_model_id          String?        @map("voice_model_id")
+  elevenlabs_voice_id     String?        @map("elevenlabs_voice_id")
+  voice_sample_url        String?        @map("voice_sample_url")
+  morning_reminder        Boolean        @default(true) @map("morning_reminder")
+  evening_reminder        Boolean        @default(true) @map("evening_reminder")
+  streak_milestones       Boolean        @default(true) @map("streak_milestones")
+  product_updates         Boolean        @default(false) @map("product_updates")
+  emailVerified           DateTime?      @map("email_verified")
+  role                    UserRole       @default(USER)
+  isActive                Boolean        @default(true) @map("is_active")
+  lastLogin               DateTime?      @map("last_login")
+  createdAt               DateTime       @default(now()) @map("created_at")
+  updatedAt               DateTime       @updatedAt @map("updated_at")
+  stripeCurrentPeriodEnd  DateTime?      @map("stripe_current_period_end")
+  stripeCustomerId        String?        @unique @map("stripe_customer_id")
+  stripePriceId           String?        @map("stripe_price_id")
+  stripeSubscriptionId    String?        @unique @map("stripe_subscription_id")
+  stripeCancelAtPeriodEnd Boolean        @default(false) @map("stripe_cancel_at_period_end")
+  binaural_enabled        Boolean        @default(false) @map("binaural_enabled")
+  soundscape              String         @default("none") @map("soundscape")
+  is_beta                 Boolean        @default(false) @map("is_beta")
+  beta_source             String?        @map("beta_source")
+  has_completed_survey    Boolean        @default(false) @map("has_completed_survey")
+  accounts                Account[]
+  voiceSamples            VoiceSample[]
+
+  sessions                Session[]
+  playEvents              PlayEvent[]
+  stories                 Story[]
+  betaCodes               UserBetaCode[]
+  betaFeedback            BetaFeedback?
+
+  @@index([email])
+  @@map("users")
+}
+
+model Story {
+  id                    String              @id @default(cuid())
+  userId                String              @map("user_id")
+  title                 String              @db.VarChar(200)
+  status                StoryStatus
+  goal_intake_json      Json                @map("goal_intake_json")
+  story_text_draft      String?             @map("story_text_draft")
+  story_text_approved   String?             @map("story_text_approved")
+  word_count            Int?                @map("word_count")
+  audio_url             String?             @map("audio_url")
+  audio_r2_key          String?             @map("audio_r2_key")
+  audio_duration_secs   Int?                @map("audio_duration_secs")
+  audio_file_size_bytes BigInt?             @map("audio_file_size_bytes")
+  audio_version         Int                 @default(0) @map("audio_version")
+  version               Int                 @default(1)
+  elevenlabs_history_id String?             @map("elevenlabs_history_id") @db.VarChar(100)
+  play_count            Int                 @default(0) @map("play_count")
+  download_count        Int                 @default(0) @map("download_count")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+  approved_at           DateTime?           @map("approved_at")
+  audio_generated_at    DateTime?           @map("audio_generated_at")
+  story_length_option   String?             @map("story_length_option") @db.VarChar(20)
+  affirmations_json     Json?               @map("affirmations_json")
+  binaural_audio_key    String?             @map("binaural_audio_key")
+  combined_audio_key    String?             @map("combined_audio_key")
+  soundscape_audio_key  String?             @map("soundscape_audio_key")
+  voice_only_r2_key     String?             @map("voice_only_r2_key")
+  playEvents            PlayEvent[]
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audioVersions         StoryAudioVersion[]
+  versions              StoryVersion[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("stories")
+}
+
+model StoryVersion {
+  id           String        @id @default(cuid())
+  storyId      String        @map("story_id")
+  version      Int
+  title        String
+  body         String
+  word_count   Int           @map("word_count")
+  source       VersionSource
+  regen_prompt String?       @map("regen_prompt")
+  created_at   DateTime      @default(now()) @map("created_at")
+  story        Story         @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, version])
+  @@index([storyId])
+  @@index([created_at])
+  @@map("story_versions")
+}
+
+model StoryAudioVersion {
+  id            String   @id @default(cuid())
+  storyId       String   @map("story_id")
+  audio_version Int      @map("audio_version")
+  r2_key        String   @map("r2_key")
+  duration_s    Int?     @map("duration_s")
+  size_bytes    Int?     @map("size_bytes")
+  created_at    DateTime @default(now()) @map("created_at")
+  story         Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, audio_version])
+  @@index([storyId])
+  @@index([created_at])
+  @@map("story_audio_versions")
+}
+
+model PlayEvent {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  storyId       String    @map("story_id")
+  event_type    EventType @map("event_type")
+  duration_secs Int?      @map("duration_secs")
+  created_at    DateTime  @default(now()) @map("created_at")
+  story         Story     @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([storyId])
+  @@index([event_type])
+  @@index([created_at])
+  @@map("play_events")
+}
+
+model PlanLimit {
+  id                   String   @id @default(cuid())
+  plan                 Plan     @unique
+  max_library_stories  Int      @map("max_library_stories")
+  stories_per_month    Int?     @map("stories_per_month")
+  audio_mins_per_month Int?     @map("audio_mins_per_month")
+  audio_length_secs    Int      @map("audio_length_secs")
+  audio_length_desc    String   @map("audio_length_desc")
+  created_at           DateTime @default(now()) @map("created_at")
+  updated_at           DateTime @updatedAt @map("updated_at")
+
+  @@map("plan_limits")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model BetaCode {
+  id            String         @id @default(cuid())
+  code          String         @unique
+  type          String         @default("amplifier_2_months")
+  max_uses      Int            @default(1) @map("max_uses")
+  current_uses  Int            @default(0) @map("current_uses")
+  expires_at    DateTime?      @map("expires_at")
+  isActive      Boolean        @default(true) @map("is_active")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  userBetaCodes UserBetaCode[]
+
+  @@map("beta_codes")
+}
+
+model UserBetaCode {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  codeId      String    @map("code_id")
+  activatedAt DateTime  @default(now()) @map("activated_at")
+  expiresAt   DateTime? @map("expires_at")
+  betaCode    BetaCode  @relation(fields: [codeId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeId])
+  @@index([userId])
+  @@index([codeId])
+  @@map("user_beta_codes")
+}
+
+model WaitlistEntry {
+  id        String   @id @default(cuid())
+  firstName String   @map("first_name")
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("waitlist_entries")
+}
+
+model BetaFeedback {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  responses Json     @map("responses")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("beta_feedback")
+}
+
+model SystemAudio {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  r2_key      String   @map("r2_key")
+  label       String
+  duration_s  Int?     @map("duration_s")
+  uploaded_at DateTime @default(now()) @map("uploaded_at")
+  updated_at  DateTime @updatedAt @map("updated_at")
+
+  @@map("system_audio")
+}
+
+model SoundscapeAsset {
+  id          String   @id @default(cuid())
+  title       String
+  image_url   String?  @map("image_url")
+  r2_key      String   @map("r2_key")
+  isActive    Boolean  @default(true) @map("is_active")
+  duration_s  Int?     @map("duration_s")
+  uploaded_at DateTime @default(now()) @map("uploaded_at")
+  updated_at  DateTime @updatedAt @map("updated_at")
+
+  @@map("soundscape_assets")
+}
+
+model VoiceSample {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  label       String   @default("My Voice")
+  r2_key      String   @map("r2_key")
+  sample_url  String   @map("sample_url")
+  duration_s  Int?     @map("duration_s")
+  is_default  Boolean  @default(false) @map("is_default")
+  created_at  DateTime @default(now()) @map("created_at")
+  updated_at  DateTime @updatedAt @map("updated_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("voice_samples")
+}
+
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum Soundscape {
+  none
+  ocean
+  river
+  rain
+  uplifting
+}
+
+enum AuthProvider {
+  email
+  google
+  apple
+}
+
+enum Plan {
+  free
+  activator
+  manifester
+  amplifier
+}
+
+enum StoryStatus {
+  draft
+  approved
+  audio_ready
+}
+
+enum VersionSource {
+  original
+  edited
+  regenerated
+}
+
+enum EventType {
+  play
+  download
+  sample_play
+}
