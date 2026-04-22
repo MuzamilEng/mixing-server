@@ -4,12 +4,7 @@ import cors from 'cors';
 import { prisma } from './prisma';
 import { downloadFromR2, uploadToR2, deleteFromR2 } from './r2';
 import { mixAudio, enhanceNarrationVoice } from './mixer';
-import {
-  enqueueAssembleJob,
-  getAssembleStoryStatus,
-  initAssembleWorker,
-  waitForAssembleResult,
-} from './assemble-queue';
+import { assembleStoryAudio } from './assemble';
 
 const app = express();
 const PORT = process.env.MIXING_PORT || 4000;
@@ -47,8 +42,7 @@ app.get('/health', (_req, res) => {
 // ── POST /assemble ──────────────────────────────────────────────────────────
 // Body: { storyId, userId }
 //
-// Enqueues a BullMQ job for full audio assembly. This endpoint returns quickly
-// while assembly runs in the queue worker.
+// Runs full audio assembly synchronously and returns the result.
 app.post('/assemble', requireAuth, async (req, res) => {
   const { storyId, userId } = req.body;
 
@@ -68,51 +62,17 @@ app.post('/assemble', requireAuth, async (req, res) => {
       return;
     }
 
-    const { job, alreadyQueued } = await enqueueAssembleJob({ storyId, userId });
+    console.log(`[assemble] Starting assembly for story=${storyId}`);
+    const result = await assembleStoryAudio(storyId, userId);
 
-    // Fast-path: if worker finishes almost instantly, include completion payload.
-    const maybeResult = await waitForAssembleResult(job, 1200);
-    if (maybeResult) {
-      res.json({
-        success: true,
-        queued: false,
-        completed: true,
-        jobId: job.id,
-        result: maybeResult,
-      });
-      return;
-    }
-
-    res.status(202).json({
+    res.json({
       success: true,
-      queued: true,
-      alreadyQueued,
-      jobId: job.id,
-      message: alreadyQueued
-        ? 'Audio assembly already in queue'
-        : 'Audio assembly job queued',
+      completed: true,
+      result,
     });
   } catch (err: any) {
-    console.error('[assemble] Queue enqueue error:', err);
-    res.status(500).json({ error: err.message || 'Failed to queue audio assembly' });
-  }
-});
-
-// ── GET /assemble/status?storyId=... ────────────────────────────────────────
-app.get('/assemble/status', requireAuth, async (req, res) => {
-  const storyId = String(req.query.storyId || '');
-
-  if (!storyId) {
-    res.status(400).json({ error: 'storyId is required' });
-    return;
-  }
-
-  try {
-    const status = await getAssembleStoryStatus(storyId);
-    res.json(status);
-  } catch (err: any) {
-    console.error('[assemble] Status error:', err);
-    res.status(500).json({ error: err.message || 'Failed to get queue status' });
+    console.error('[assemble] Error:', err);
+    res.status(500).json({ error: err.message || 'Audio assembly failed' });
   }
 });
 
@@ -350,6 +310,5 @@ app.post('/unmix', requireAuth, async (req, res) => {
 
 // ── Start ──────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  initAssembleWorker();
   console.log(`🎛️  Mixing server running on http://localhost:${PORT}`);
 });

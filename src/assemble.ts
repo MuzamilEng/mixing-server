@@ -3,12 +3,9 @@ import { downloadFromR2, uploadToR2, deleteFromR2 } from './r2';
 import { mixAudio, enhanceNarrationVoice } from './mixer';
 
 const CHUNK_CHARS = 1200;
-const FREE_TTS_CHUNK_CHARS = 450;
 const MAX_TTS_CONCURRENCY = Math.max(1, Number(process.env.TTS_CHUNK_CONCURRENCY ?? 2) || 2);
 const CROSSFADE_MS = 30;
 const INTRO_END_MARKER = '[INTRO_END]';
-const FREE_TTS_MAX_RETRIES = 2;
-const FREE_TTS_BASE_BACKOFF_MS = 1500;
 const FISH_MAX_RETRIES = Math.max(0, Number(process.env.FISH_TTS_MAX_RETRIES ?? 4) || 4);
 const FISH_BASE_BACKOFF_MS = Math.max(50, Number(process.env.FISH_TTS_BASE_BACKOFF_MS ?? 700) || 700);
 const FISH_MAX_BACKOFF_MS = Math.max(FISH_BASE_BACKOFF_MS, Number(process.env.FISH_TTS_MAX_BACKOFF_MS ?? 12000) || 12000);
@@ -199,59 +196,31 @@ async function fetchAdminAudio(segmentKey: 'induction' | 'guide_close'): Promise
 }
 
 async function generateFreeTTS(text: string): Promise<Buffer | null> {
-  const providers: { name: string; fn: () => Promise<Buffer | null> }[] = [
-    {
-      name: 'StreamElements',
-      fn: async () => {
-        const url = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodeURIComponent(text)}`;
-        const res = await fetch(url);
-        if (!res.ok) {
-          console.warn(`[TTS] StreamElements ${res.status} for ${text.length} chars`);
-          return null;
-        }
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length <= 500) {
-          console.warn(`[TTS] StreamElements returned tiny response (${buf.length} bytes)`);
-          return null;
-        }
-        return buf;
-      },
+  const providers = [
+    async () => {
+      const url = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodeURIComponent(text)}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf.length > 500 ? buf : null;
     },
-    {
-      name: 'GoogleTranslate',
-      fn: async () => {
-        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=en&client=tw-ob`;
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-        if (!res.ok) {
-          console.warn(`[TTS] GoogleTranslate ${res.status} for ${text.length} chars`);
-          return null;
-        }
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length <= 500) {
-          console.warn(`[TTS] GoogleTranslate returned tiny response (${buf.length} bytes)`);
-          return null;
-        }
-        return buf;
-      },
+    async () => {
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=en&client=tw-ob`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf.length > 500 ? buf : null;
     },
   ];
 
-  for (let attempt = 0; attempt <= FREE_TTS_MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      const delay = FREE_TTS_BASE_BACKOFF_MS * Math.pow(2, attempt - 1);
-      console.warn(`[TTS] Free TTS retry ${attempt}/${FREE_TTS_MAX_RETRIES} after ${delay}ms`);
-      await sleep(delay);
-    }
-    for (const provider of providers) {
-      try {
-        const buf = await provider.fn();
-        if (buf) return buf;
-      } catch (e: any) {
-        console.warn(`[TTS] ${provider.name} error: ${e.message}`);
-      }
+  for (const fetchAudio of providers) {
+    try {
+      const buf = await fetchAudio();
+      if (buf) return buf;
+    } catch {
+      // try next provider
     }
   }
-  console.error(`[TTS] All free TTS providers failed after ${FREE_TTS_MAX_RETRIES + 1} attempts for ${text.length} chars`);
   return null;
 }
 
@@ -464,10 +433,9 @@ export async function assembleStoryAudio(storyId: string, userId: string): Promi
 
   async function generateTTSForText(text: string, label: string): Promise<Buffer[]> {
     const prepared = prepareNarrationText(text);
-    const maxChars = ttsProvider === 'free' ? FREE_TTS_CHUNK_CHARS : CHUNK_CHARS;
-    const chunks = splitIntoNarrationChunks(prepared, maxChars);
+    const chunks = splitIntoNarrationChunks(prepared);
 
-    console.log(`[assemble] ${label}: ${prepared.length} chars -> ${chunks.length} chunks (max ${maxChars})`);
+    console.log(`[assemble] ${label}: ${prepared.length} chars -> ${chunks.length} chunks`);
 
     const buffers: Buffer[] = new Array(chunks.length);
     const workerCount = Math.min(MAX_TTS_CONCURRENCY, chunks.length);
